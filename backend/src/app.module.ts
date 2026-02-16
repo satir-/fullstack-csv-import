@@ -6,18 +6,18 @@ import { ImportsModule } from './imports/imports.module';
 
 @Module({
   imports: [
-      TypeOrmModule.forRoot({
-        type: 'postgres',
-        host: process.env.DB_HOST || 'postgres', // Name of the docker container
-        port: 5432,
-        username: 'dev',
-        password: 'dev',
-        database: 'csv_import',
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        autoLoadEntities: true,
-        synchronize: true
-      }),
-      ImportsModule,
+    TypeOrmModule.forRoot({
+      type: 'postgres',
+      host: process.env.DB_HOST || 'postgres', // Name of the docker container
+      port: 5432,
+      username: 'dev',
+      password: 'dev',
+      database: 'csv_import',
+      entities: [__dirname + '/**/*.entity{.ts,.js}'],
+      autoLoadEntities: true,
+      synchronize: true,
+    }),
+    ImportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

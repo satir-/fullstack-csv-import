@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { ImportsService } from './imports.service';
+import { ImportTaskService } from './import-task.service';
 
 @Controller('imports')
-export class ImportsController {
-  constructor(private readonly importsService: ImportsService) {}
+export class ImportTaskController {
+  constructor(private readonly importsService: ImportTaskService) {}
 
   @Get('tasks')
   list() {
