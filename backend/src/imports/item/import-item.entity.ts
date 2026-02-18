@@ -1,11 +1,15 @@
 import {
   Column,
   CreateDateColumn,
-  Entity, Index,
-  JoinColumn, ManyToOne,
-  PrimaryGeneratedColumn, RelationId,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  RelationId,
   UpdateDateColumn,
 } from 'typeorm';
+
 import { ImportTask } from '../task/import-task.entity';
 
 @Entity()
