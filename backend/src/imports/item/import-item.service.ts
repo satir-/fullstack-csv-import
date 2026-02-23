@@ -12,11 +12,14 @@ export class ImportItemService {
     private readonly importItemRepo: Repository<ImportItem>,
   ) {}
 
+  /** Creates a new item with the provided task ID and raw data and saves it to the repository. */
   async create(taskId: number, rawData: string) {
     const item = this.importItemRepo.create({ rawData, task: { id: taskId } });
     return this.importItemRepo.save(item);
   }
 
+  // TODO: Will be used within the "file processing" routing for related API route
+  /** Processes a CSV file from a buffer, parses its content, and saves the data into the repository. */
   async importCsv(taskId: number, buffer: Buffer) {
     const text = buffer.toString('utf-8');
 

@@ -6,20 +6,28 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+import { ImportTaskStatus } from './import-task-status.enum';
+
 @Entity()
 export class ImportTask {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  filename: string;
+  @Column({ nullable: true })
+  filename?: string | null;
 
-  @Column({ default: 'pending' })
-  status: string;
+  @Column({ nullable: true })
+  fileKey?: string | null;
+
+  @Column({
+    type: 'varchar',
+    default: ImportTaskStatus.CREATED,
+  })
+  status: ImportTaskStatus;
 
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
-  uploadedAt?: Date;
+  updatedAt: Date;
 }
