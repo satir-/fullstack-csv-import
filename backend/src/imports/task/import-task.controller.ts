@@ -40,4 +40,9 @@ export class ImportTaskController {
 
     return this.importsTaskService.uploadFile(taskId, rawDataFile);
   }
+
+  @Post('tasks/:taskId/process')
+  processFile(@Param('taskId', ParseIntPipe) taskId: number) {
+    return this.importsTaskService.processFile(taskId);
+  }
 }

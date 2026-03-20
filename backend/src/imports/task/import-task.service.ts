@@ -1,17 +1,27 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import { ImportTaskStatus } from './import-task-status.enum';
 import { ImportTask } from './import-task.entity';
+import { ImportItemService } from '../item/import-item.service';
+
+const STORAGE_FOLDER_NAME = 'storage';
 
 @Injectable()
 export class ImportTaskService {
   constructor(
     @InjectRepository(ImportTask)
     private readonly repo: Repository<ImportTask>,
+    private readonly importItemService: ImportItemService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /** Creates task intent before any file is uploaded. */
@@ -29,7 +39,7 @@ export class ImportTaskService {
     // Prefer a client-provided originalname; filename is mostly useful with disk storage naming.
     const originalFilename = rawDataFile.originalname || rawDataFile.filename;
     const fileKey = this.buildFileKey(taskId, originalFilename);
-    const filePath = path.join(process.cwd(), 'storage', fileKey);
+    const filePath = path.join(process.cwd(), STORAGE_FOLDER_NAME, fileKey);
 
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, rawDataFile.buffer);
@@ -39,6 +49,73 @@ export class ImportTaskService {
       fileKey,
       status: ImportTaskStatus.UPLOADED,
     });
+
+    return this.requireTask(taskId);
+  }
+
+  /**
+   * Starts working on a file parse and marks a task as 'processing'.
+   * Marks task status as 'completed' on success, 'failed' on error.
+   * */
+  async processFile(taskId: number): Promise<ImportTask> {
+    const task = await this.requireTask(taskId);
+
+    if (!task.fileKey)
+      throw new NotFoundException(
+        `Task ${taskId} does not have a fileKey to process`,
+      );
+
+    // Allow processing only for uploaded tasks and retries from failed status.
+    if (
+      ![ImportTaskStatus.UPLOADED, ImportTaskStatus.FAILED].includes(
+        task.status,
+      )
+    ) {
+      throw new ConflictException(
+        `Task ${taskId} has invalid status ${task.status} for processing`,
+      );
+    }
+
+    const filePath = path.join(
+      process.cwd(),
+      STORAGE_FOLDER_NAME,
+      task.fileKey,
+    );
+
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await fs.readFile(filePath);
+    } catch (e: unknown) {
+      throw new NotFoundException(
+        `Task ${taskId} file not found. Error: ${normalizeError(e)}`,
+      );
+    }
+
+    await this.repo.update(taskId, {
+      status: ImportTaskStatus.PROCESSING,
+    });
+
+    try {
+      // Keep item writes and completion status update atomic to avoid a partial "completed" state.
+      await this.dataSource.transaction(async (manager) => {
+        await this.importItemService.importCsvWithManager(
+          manager,
+          taskId,
+          fileBuffer,
+        );
+        await manager.getRepository(ImportTask).update(taskId, {
+          status: ImportTaskStatus.COMPLETED,
+        });
+      });
+    } catch (e: unknown) {
+      await this.repo.update(taskId, {
+        status: ImportTaskStatus.FAILED,
+      });
+
+      throw new InternalServerErrorException(
+        `Task ${taskId} processing failed with error: ${normalizeError(e)}`,
+      );
+    }
 
     return this.requireTask(taskId);
   }
@@ -68,4 +145,9 @@ export class ImportTaskService {
     const uniqueName = `${Date.now()}-${sanitizedFilename}`;
     return path.join('imports', String(taskId), uniqueName);
   }
+}
+
+/** Normalize unknown thrown values into a safe string message. */
+function normalizeError(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
