@@ -7,7 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 
 import { ImportTaskStatus } from './import-task-status.enum';
 import { ImportTask } from './import-task.entity';
@@ -65,17 +65,6 @@ export class ImportTaskService {
         `Task ${taskId} does not have a fileKey to process`,
       );
 
-    // Allow processing only for uploaded tasks and retries from failed status.
-    if (
-      ![ImportTaskStatus.UPLOADED, ImportTaskStatus.FAILED].includes(
-        task.status,
-      )
-    ) {
-      throw new ConflictException(
-        `Task ${taskId} has invalid status ${task.status} for processing`,
-      );
-    }
-
     const filePath = path.join(
       process.cwd(),
       STORAGE_FOLDER_NAME,
@@ -84,6 +73,7 @@ export class ImportTaskService {
 
     let fileBuffer: Buffer;
     try {
+      // TODO: Consider using a stream instead of buffering the whole file.
       fileBuffer = await fs.readFile(filePath);
     } catch (e: unknown) {
       throw new NotFoundException(
@@ -91,9 +81,22 @@ export class ImportTaskService {
       );
     }
 
-    await this.repo.update(taskId, {
-      status: ImportTaskStatus.PROCESSING,
-    });
+    // Allow processing only for uploaded tasks and retries from failed status.
+    // (Applying status guard on DB level, in cases of fast concurrent requests)
+    const res = await this.repo.update(
+      {
+        id: taskId,
+        status: In([ImportTaskStatus.UPLOADED, ImportTaskStatus.FAILED]),
+      },
+      { status: ImportTaskStatus.PROCESSING },
+    );
+
+    if ((res.affected ?? 0) !== 1) {
+      const currentTask = await this.requireTask(taskId);
+      throw new ConflictException(
+        `Task ${taskId} cannot be processed from status ${currentTask.status}`,
+      );
+    }
 
     try {
       // Keep item writes and completion status update atomic to avoid a partial "completed" state.

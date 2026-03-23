@@ -18,15 +18,6 @@ export class ImportItemService {
     return this.importItemRepo.save(item);
   }
 
-  /** Processes a CSV file from a buffer, parses its content, and saves the data into the repository. */
-  async importCsv(taskId: number, buffer: Buffer) {
-    return this.importCsvWithManager(
-      this.importItemRepo.manager,
-      taskId,
-      buffer,
-    );
-  }
-
   /** The same CSV import flow but bound to the provided entity manager/transaction. */
   async importCsvWithManager(
     manager: EntityManager,
