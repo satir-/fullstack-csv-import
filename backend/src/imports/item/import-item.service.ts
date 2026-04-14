@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { parse } from 'csv-parse/sync';
+import { parse as asyncParse } from 'csv-parse';
+import { parse as syncParse } from 'csv-parse/sync';
+import { createReadStream, PathLike } from 'node:fs';
 import { EntityManager, Repository } from 'typeorm';
 
 import { ImportItem } from './import-item.entity';
+
+const SYNC_IMPORT_BATCH_SIZE = 1000;
 
 @Injectable()
 export class ImportItemService {
@@ -18,7 +22,7 @@ export class ImportItemService {
     return this.importItemRepo.save(item);
   }
 
-  /** The same CSV import flow but bound to the provided entity manager/transaction. */
+  /** CSV import flow, bound to the provided entity manager/transaction. */
   async importCsvWithManager(
     manager: EntityManager,
     taskId: number,
@@ -26,26 +30,40 @@ export class ImportItemService {
   ) {
     const text = buffer.toString('utf-8');
 
-    const records = parse(text, {
+    const records = syncParse(text, {
       columns: false,
       skip_empty_lines: true,
       trim: true,
     });
 
     const itemRepo = manager.getRepository(ImportItem);
+    let imported = 0;
 
-    const items = records.map((row: string[]) =>
-      itemRepo.create({
-        rawData: row.join(','), // or JSON.stringify(row), or map to columns later
-        task: { id: taskId },
-      }),
-    );
-
-    await itemRepo.save(items);
+    for (let i = 0; i < records.length; i += SYNC_IMPORT_BATCH_SIZE) {
+      const batch = records.slice(i, i + SYNC_IMPORT_BATCH_SIZE);
+      const items = batch.map((row: string[]) =>
+        itemRepo.create({
+          rawData: row.join(','), // or JSON.stringify(row), or map to columns later
+          task: { id: taskId },
+        }),
+      );
+      await itemRepo.save(items);
+      imported += items.length;
+    }
 
     return {
       taskId,
-      imported: items.length,
+      imported,
     };
+  }
+
+  /** Creates a CSV parser stream for async iterator processing. */
+  getStreamCsvParser(filePath: PathLike) {
+    const parserOptions = {
+      columns: false,
+      skip_empty_lines: true,
+      trim: true,
+    };
+    return createReadStream(filePath).pipe(asyncParse(parserOptions));
   }
 }

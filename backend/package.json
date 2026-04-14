@@ -18,7 +18,9 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "imports:cleanup": "node scripts/cleanup-import-storage.mjs --days=7"
+    "imports:cleanup": "node scripts/cleanup-import-storage.mjs --days=7",
+    "lab:csv:generate": "node scripts/generate-lab-csv.mjs",
+    "lab:benchmark": "node scripts/benchmark-import-strategies.mjs"
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",
