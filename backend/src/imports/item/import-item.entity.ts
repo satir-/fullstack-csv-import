@@ -32,6 +32,10 @@ export class ImportItem {
   @Column()
   rawData: string;
 
+  /**
+   * Kept as "pending" intentionally: parsed rows are persisted first,
+   * then future pipeline stages can normalize/enrich and transition status.
+   */
   @Column({ default: 'pending' })
   status: string;
 

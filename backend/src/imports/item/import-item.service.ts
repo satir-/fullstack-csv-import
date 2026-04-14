@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { parse } from 'csv-parse/sync';
+import { Parser } from 'csv-parse';
+import { parse as asyncParse } from 'csv-parse';
+import { createReadStream, PathLike } from 'node:fs';
 import { EntityManager, Repository } from 'typeorm';
 
 import { ImportItem } from './import-item.entity';
@@ -18,20 +20,12 @@ export class ImportItemService {
     return this.importItemRepo.save(item);
   }
 
-  /** The same CSV import flow but bound to the provided entity manager/transaction. */
-  async importCsvWithManager(
+  /** Persists one parsed CSV batch inside the provided transaction manager. */
+  async saveCsvBatchWithManager(
     manager: EntityManager,
     taskId: number,
-    buffer: Buffer,
+    records: string[][],
   ) {
-    const text = buffer.toString('utf-8');
-
-    const records = parse(text, {
-      columns: false,
-      skip_empty_lines: true,
-      trim: true,
-    });
-
     const itemRepo = manager.getRepository(ImportItem);
 
     const items = records.map((row: string[]) =>
@@ -42,10 +36,17 @@ export class ImportItemService {
     );
 
     await itemRepo.save(items);
+  }
 
-    return {
-      taskId,
-      imported: items.length,
-    };
+  /** Creates a CSV parser stream for async iterator processing. */
+  getStreamCsvParser(filePath: PathLike): AsyncIterable<string[]> {
+    const parser = createReadStream(filePath).pipe(
+      asyncParse({
+        columns: false,
+        skip_empty_lines: true,
+        trim: true,
+      }),
+    );
+    return parser as Parser & AsyncIterable<string[]>;
   }
 }

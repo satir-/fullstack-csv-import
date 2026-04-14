@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,9 +15,13 @@ import { ImportTask } from './import-task.entity';
 import { ImportItemService } from '../item/import-item.service';
 
 const STORAGE_FOLDER_NAME = 'storage';
+const ASYNC_BATCH_SIZE = 1000;
+const ASYNC_PROGRESS_LOG_EVERY_BATCHES = 10;
 
 @Injectable()
 export class ImportTaskService {
+  private readonly logger = new Logger(ImportTaskService.name);
+
   constructor(
     @InjectRepository(ImportTask)
     private readonly repo: Repository<ImportTask>,
@@ -71,10 +76,8 @@ export class ImportTaskService {
       task.fileKey,
     );
 
-    let fileBuffer: Buffer;
     try {
-      // TODO: Consider using a stream instead of buffering the whole file.
-      fileBuffer = await fs.readFile(filePath);
+      await fs.access(filePath);
     } catch (e: unknown) {
       throw new NotFoundException(
         `Task ${taskId} file not found. Error: ${normalizeError(e)}`,
@@ -98,22 +101,62 @@ export class ImportTaskService {
       );
     }
 
+    this.logger.log(`Processing started for task=${taskId}`);
+
     try {
       // Keep item writes and completion status update atomic to avoid a partial "completed" state.
       await this.dataSource.transaction(async (manager) => {
-        await this.importItemService.importCsvWithManager(
-          manager,
-          taskId,
-          fileBuffer,
-        );
+        const parser = this.importItemService.getStreamCsvParser(filePath);
+        const batchedRecords: string[][] = [];
+        let processedCount = 0;
+        let processedBatches = 0;
+
+        // CSV stream parser returns iterator by default
+        for await (const row of parser) {
+          batchedRecords.push(row);
+
+          if (batchedRecords.length >= ASYNC_BATCH_SIZE) {
+            await this.importItemService.saveCsvBatchWithManager(
+              manager,
+              taskId,
+              batchedRecords,
+            );
+            processedCount += batchedRecords.length;
+            processedBatches += 1;
+            batchedRecords.length = 0;
+
+            if (processedBatches % ASYNC_PROGRESS_LOG_EVERY_BATCHES === 0) {
+              this.logger.log(
+                `Processing progress for task=${taskId}: batches=${processedBatches}, imported=${processedCount}`,
+              );
+            }
+          }
+        }
+
+        if (batchedRecords.length > 0) {
+          await this.importItemService.saveCsvBatchWithManager(
+            manager,
+            taskId,
+            batchedRecords,
+          );
+          processedCount += batchedRecords.length;
+        }
+
         await manager.getRepository(ImportTask).update(taskId, {
           status: ImportTaskStatus.COMPLETED,
         });
+
+        this.logger.log(
+          `Processing completed for task=${taskId}, imported=${processedCount}`,
+        );
       });
     } catch (e: unknown) {
       await this.repo.update(taskId, {
         status: ImportTaskStatus.FAILED,
       });
+      this.logger.error(
+        `Processing failed for task=${taskId}: ${normalizeError(e)}`,
+      );
 
       throw new InternalServerErrorException(
         `Task ${taskId} processing failed with error: ${normalizeError(e)}`,
