@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -39,7 +40,12 @@ export class ImportTaskService {
 
   /** Stores the uploaded file and marks task status as uploaded. */
   async uploadFile(taskId: number, rawDataFile: Express.Multer.File) {
-    await this.requireTask(taskId);
+    const task = await this.requireTask(taskId);
+    if (task.status !== ImportTaskStatus.CREATED) {
+      throw new ConflictException(
+        `Task ${taskId} cannot be uploaded from status ${task.status}`,
+      );
+    }
 
     // Prefer a client-provided originalname; filename is mostly useful with disk storage naming.
     const originalFilename = rawDataFile.originalname || rawDataFile.filename;
@@ -49,11 +55,25 @@ export class ImportTaskService {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, rawDataFile.buffer);
 
-    await this.repo.update(taskId, {
-      filename: originalFilename,
-      fileKey,
-      status: ImportTaskStatus.UPLOADED,
-    });
+    const res = await this.repo.update(
+      {
+        id: taskId,
+        status: ImportTaskStatus.CREATED,
+      },
+      {
+        filename: originalFilename,
+        fileKey,
+        status: ImportTaskStatus.UPLOADED,
+      },
+    );
+
+    if ((res.affected ?? 0) !== 1) {
+      await fs.rm(filePath, { force: true });
+      const currentTask = await this.requireTask(taskId);
+      throw new ConflictException(
+        `Task ${taskId} cannot be uploaded from status ${currentTask.status}`,
+      );
+    }
 
     return this.requireTask(taskId);
   }
@@ -157,6 +177,10 @@ export class ImportTaskService {
       this.logger.error(
         `Processing failed for task=${taskId}: ${normalizeError(e)}`,
       );
+
+      if (e instanceof HttpException) {
+        throw e;
+      }
 
       throw new InternalServerErrorException(
         `Task ${taskId} processing failed with error: ${normalizeError(e)}`,
